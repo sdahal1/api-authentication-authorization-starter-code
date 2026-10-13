@@ -1,0 +1,170 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Fictional bank API learning lab. Cognito sign-in, JWT scope checks, and per-account authorization.
+
+Parameters:
+  CognitoDomainPrefix:
+    Type: String
+    AllowedPattern: '^[a-z0-9][a-z0-9-]{1,60}[a-z0-9]$'
+    Description: Unique Cognito domain prefix, for example bank-auth-yourname-2026.
+  AliceSubject:
+    Type: String
+    Default: ''
+    MaxLength: 256
+    Description: Alice demo user's Cognito sub. Leave empty until the user has signed up.
+  BobSubject:
+    Type: String
+    Default: ''
+    MaxLength: 256
+    Description: Bob demo user's Cognito sub. Leave empty until the user has signed up.
+
+Resources:
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      UserPoolName: !Sub ${AWS::StackName}-users
+      UserPoolTier: ESSENTIALS
+      UsernameAttributes: [email]
+      AutoVerifiedAttributes: [email]
+      UsernameConfiguration:
+        CaseSensitive: false
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: false
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 12
+          RequireLowercase: true
+          RequireUppercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+
+  BankResourceServer:
+    Type: AWS::Cognito::UserPoolResourceServer
+    Properties:
+      UserPoolId: !Ref UserPool
+      Identifier: bank-api
+      Name: Fictional bank API
+      Scopes:
+        - ScopeName: accounts.read
+          ScopeDescription: Request account information; backend still checks individual account access.
+
+  WebClient:
+    Type: AWS::Cognito::UserPoolClient
+    DependsOn: BankResourceServer
+    Properties:
+      UserPoolId: !Ref UserPool
+      ClientName: local-browser-demo
+      GenerateSecret: false
+      SupportedIdentityProviders: [COGNITO]
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows: [code]
+      AllowedOAuthScopes: [openid, bank-api/accounts.read]
+      CallbackURLs: ['http://localhost:8080/']
+      LogoutURLs: ['http://localhost:8080/']
+      AccessTokenValidity: 15
+      IdTokenValidity: 15
+      RefreshTokenValidity: 1
+      TokenValidityUnits:
+        AccessToken: minutes
+        IdToken: minutes
+        RefreshToken: days
+      EnableTokenRevocation: true
+      PreventUserExistenceErrors: ENABLED
+
+  LoginDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      UserPoolId: !Ref UserPool
+      Domain: !Ref CognitoDomainPrefix
+      ManagedLoginVersion: 2
+
+  LoginBranding:
+    Type: AWS::Cognito::ManagedLoginBranding
+    DependsOn: LoginDomain
+    Properties:
+      UserPoolId: !Ref UserPool
+      ClientId: !Ref WebClient
+      UseCognitoProvidedValues: true
+
+  BankApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: '$default'
+      CorsConfiguration:
+        AllowOrigins: ['http://localhost:8080']
+        AllowMethods: [GET, OPTIONS]
+        AllowHeaders: [Authorization, Content-Type]
+      Auth:
+        DefaultAuthorizer: BankJwtAuthorizer
+        Authorizers:
+          BankJwtAuthorizer:
+            IdentitySource: '$request.header.Authorization'
+            JwtConfiguration:
+              issuer: !Sub https://cognito-idp.${AWS::Region}.${AWS::URLSuffix}/${UserPool}
+              audience: [!Ref WebClient]
+            AuthorizationScopes: [bank-api/accounts.read]
+
+  BankFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Runtime: python3.12
+      Handler: app.handler
+      CodeUri: src/
+      Timeout: 5
+      MemorySize: 128
+      Environment:
+        Variables:
+          ALICE_SUB: !Ref AliceSubject
+          BOB_SUB: !Ref BobSubject
+      Events:
+        Branches:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref BankApi
+            Path: /branches
+            Method: GET
+            PayloadFormatVersion: '2.0'
+            Auth:
+              Authorizer: NONE
+        Accounts:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref BankApi
+            Path: /accounts
+            Method: GET
+            PayloadFormatVersion: '2.0'
+            Auth:
+              Authorizer: BankJwtAuthorizer
+              AuthorizationScopes: [bank-api/accounts.read]
+        Balance:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref BankApi
+            Path: /accounts/{accountId}/balance
+            Method: GET
+            PayloadFormatVersion: '2.0'
+            Auth:
+              Authorizer: BankJwtAuthorizer
+              AuthorizationScopes: [bank-api/accounts.read]
+
+  FunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${BankFunction}
+      RetentionInDays: 7
+
+Outputs:
+  ApiUrl:
+    Value: !Sub https://${BankApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}
+  UserPoolId:
+    Value: !Ref UserPool
+  CognitoClientId:
+    Value: !Ref WebClient
+  CognitoDomainUrl:
+    Value: !Sub https://${LoginDomain}.auth.${AWS::Region}.amazoncognito.com
+  FunctionName:
+    Value: !Ref BankFunction

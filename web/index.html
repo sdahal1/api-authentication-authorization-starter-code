@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Fictional Bank · API access lab</title>
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <main>
+    <p class="eyebrow">AWS API authentication learning lab</p>
+    <h1>Your sign-in. Your accounts.</h1>
+    <p class="intro">Explore what a token can prove—and why your backend must still check each account.</p>
+    <p class="note">All balances and branch details are fictional. This is a learning demo.</p>
+    <section>
+      <h2>1. Try a public route</h2>
+      <p><code>GET /branches</code> works without signing in.</p>
+      <button id="branches">Load public branches</button>
+    </section>
+    <section>
+      <h2>2. Sign in with Amazon Cognito</h2>
+      <p id="session" role="status">Loading configuration…</p>
+      <div class="actions">
+        <button id="signin">Sign in / create demo user</button>
+        <button id="signout" class="secondary">Sign out</button>
+      </div>
+      <p class="small">Tokens stay in this page's memory. Reloading clears them; sign in again to continue.</p>
+    </section>
+    <section>
+      <h2>3. Request an account</h2>
+      <p><code>GET /accounts</code> lists only accounts the signed-in user can access.</p>
+      <button id="accounts">List my accounts</button>
+      <label for="accountId">Account ID: Alice = 5521 · Bob = 8842</label>
+      <div class="actions">
+        <input id="accountId" value="5521" inputmode="numeric" aria-describedby="account-help">
+        <button id="balance">Get balance</button>
+      </div>
+      <p id="account-help" class="small">Try your own account, then the other user's account. A valid token alone does not grant access.</p>
+    </section>
+    <details>
+      <summary>Test the API Gateway checks</summary>
+      <p>Use a fresh sign-in without the <code>bank-api/accounts.read</code> scope to see a 403 on a protected route.</p>
+      <button id="noscope" class="secondary">Sign in without account scope</button>
+      <button id="noauth" class="secondary">Request accounts without a token</button>
+    </details>
+    <section>
+      <h2>API response</h2>
+      <p id="result-label" role="status">Choose a request above.</p>
+      <pre id="result" aria-live="polite">{}</pre>
+    </section>
+  </main>
+</body>
+</html>
